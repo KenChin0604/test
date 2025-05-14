@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>サンズ戦風ゲーム</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Press Start 2P', cursive;
+            background-color: #000;
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            overflow: hidden; /* スクロールバーを隠す */
+        }
+        #gameCanvas {
+            background-color: #0a0a0a; /* 少し明るい黒 */
+            border: 2px solid #fff;
+            box-shadow: 0 0 15px #fff, 0 0 25px #00f, 0 0 35px #f0f; /* サイバーパンク風の輝き */
+            border-radius: 8px;
+        }
+        .game-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1rem; /* 要素間のスペース */
+            /* 画面サイズに合わせてコンテンツを収めるための調整 */
+            max-height: 100vh; /* ビューポートの高さを超えないようにする */
+            overflow-y: auto; /* 必要に応じて縦スクロールを許可 */
+            padding: 1rem; /* コンテナ内の余白 */
+            box-sizing: border-box; /* paddingをwidth/heightに含める */
+        }
+        .controls-container {
+            display: flex;
+            gap: 1rem; /* ボタン間のスペース */
+        }
+        button {
+            font-family: 'Press Start 2P', cursive;
+            background-color: #1a1a1a;
+            color: #fff;
+            border: 2px solid #fff;
+            padding: 10px 20px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border-radius: 5px;
+            box-shadow: 0 0 5px #fff, 0 0 10px #0ff;
+        }
+        button:hover {
+            background-color: #fff;
+            color: #000;
+            box-shadow: 0 0 10px #fff, 0 0 20px #0ff, 0 0 30px #0ff;
+        }
+        button:active {
+            transform: scale(0.95);
+        }
+        .info-text {
+            font-size: 0.8rem;
+            color: #aaa;
+            margin-top: 10px;
+            text-align: center; /* 中央寄せ */
+        }
+        .score-board, .hp-board {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+        }
+        .score-board {
+            color: #0f0; /* 緑色のスコア */
+        }
+        .hp-board {
+            color: #f00; /* 赤色のHP */
+        }
+        .game-over-message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 2rem;
+            color: red;
+            background-color: rgba(0,0,0,0.7);
+            padding: 20px;
+            border-radius: 10px;
+            border: 2px solid red;
+            text-align: center;
+            z-index: 100; /* キャンバスより手前に表示 */
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <h1 class="text-3xl mb-4">サンズ戦風ゲーム</h1>
+        <div id="scoreBoard" class="score-board">スコア: 0</div>
+        <div id="hpBoard" class="hp-board">HP: 99</div>
+        <canvas id="gameCanvas"></canvas>
+        <div class="controls-container mt-4">
+            <button id="startButton">スタート</button>
+            <button id="restartButton" style="display: none;">リスタート</button>
+        </div>
+        <p class="info-text">矢印キーでハートを操作して骨とガスターブラスターを避けろ！<br>オレンジの骨は止まっていると、青い骨は動いているとダメージ！<br>Shiftキーを押しながら矢印キーでゆっくり移動！<br>骨のウェーブや壁に注意しろ！</p>
+        <div id="gameOverMessage" class="game-over-message" style="display: none;">
+            ゲームオーバー！
+        </div>
+    </div>
+
+    <script>
+        // Canvas要素と2Dレンダリングコンテキストを取得
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // UI要素
+        const startButton = document.getElementById('startButton');
+        const restartButton = document.getElementById('restartButton');
+        const scoreBoard = document.getElementById('scoreBoard');
+        const hpBoard = document.getElementById('hpBoard'); // HP表示要素を取得
+        const gameOverMessage = document.getElementById('gameOverMessage');
+
+        // ゲームの基本設定
+        let canvasWidth = 600; // キャンバスの幅を増加
+        let canvasHeight = 400; // キャンバスの高さを増加
+        canvas.width = canvasWidth;
+        canvas.height = canvasHeight;
+
+        // プレイヤー（ハート）の設定
+        const player = {
+            x: 50,
+            y: canvasHeight / 2 - 10, // 初期位置を中央付近に設定
+            width: 20, // ハートの描画サイズ（幅）
+            height: 20, // ハートの描画サイズ（高さ）
+            color: 'red',
+            normalSpeed: 8, // 通常移動速度
+            slowSpeed: 3, // ゆっくり移動速度
+            currentSpeed: 8, // 現在の移動速度
+            dx: 0, // X軸方向の移動量
+            dy: 0,  // Y軸方向の移動量
+            maxHp: 99, // 最大HP
+            hp: 99, // 現在のHP
+            isInvincible: false, // 無敵状態かどうか
+            invincibilityDuration: 100, // 無敵時間 (ミリ秒) - 0.1秒ごとにダメージ
+            lastDamageTime: 0 // 最後にダメージを受けた時刻
+        };
+
+        // 骨の設定
+        const bones = [];
+        const boneProps = {
+            width: 10, // 骨の幅
+            height: 120, // 骨の高さ (デフォルト)
+            color: 'white', // デフォルトの骨の色
+            speed: 3, // 骨の移動速度
+            spawnInterval: 500, // ランダム骨が出現する間隔 (ウェーブ中は使用されないか頻度低下)
+            minSpawnInterval: 250, // 骨の最小出現間隔 (ミリ秒) - ここで制御
+            types: ['white', 'orange', 'blue'] // 骨の種類
+        };
+        let lastBoneSpawnTime = 0;
+
+        // ガスターブラスターの設定
+        const gasterBlasters = [];
+        const gasterBlasterProps = {
+            size: 30, // ガスターブラスターのサイズ (正方形)
+            laserLength: 400, // レーザーの長さ (増加)
+            laserWidth: 15, // レーザーの幅
+            chargeTime: 500, // 発射までのチャージ時間 (ミリ秒)
+            laserDuration: 300, // レーザーが表示される時間 (ミリ秒)
+            color: '#0ff', // シアン色
+            spawnInterval: 3000, // ガスターブラスターが出現する間隔 (ミリ秒)
+            minSpawnInterval: 1500 // ガスターブラスターの最小出現間隔 (ミリ秒)
+        };
+        let lastGasterBlasterSpawnTime = 0;
+
+        // ゲームの状態
+        let gameRunning = false;
+        let animationId;
+        let score = 0;
+        let startTime;
+
+        // 現在押されているキーを記録するセット
+        const pressedKeys = new Set();
+
+        // --- ウェーブ管理 ---
+        const wavePatterns = [
+            // 横一列ウェーブ (白い骨)
+            [
+                { y: canvasHeight / 4, type: 'white', delay: 0 },
+                { y: canvasHeight / 4, type: 'white', delay: 100 },
+                { y: canvasHeight / 4, type: 'white', delay: 200 },
+                { y: canvasHeight / 4, type: 'white', delay: 300 },
+                { y: canvasHeight / 4, type: 'white', delay: 400 },
+            ],
+            // 上下交互ウェーブ (青/オレンジ骨)
+            [
+                { y: canvasHeight / 4, type: 'blue', delay: 0 },
+                { y: canvasHeight * 3/4 - boneProps.height, type: 'orange', delay: 150 },
+                { y: canvasHeight / 4, type: 'blue', delay: 300 },
+                { y: canvasHeight * 3/4 - boneProps.height, type: 'orange', delay: 450 },
+                { y: canvasHeight / 4, type: 'blue', delay: 600 },
+            ],
+             // トンネルウェーブ (白い骨, 可変高さ)
+             [
+                { y: 0, type: 'white', height: canvasHeight / 3, delay: 0 },
+                { y: canvasHeight - canvasHeight / 3, type: 'white', height: canvasHeight / 3, delay: 0 },
+                { y: 0, type: 'white', height: canvasHeight / 3, delay: 500 },
+                { y: canvasHeight - canvasHeight / 3, type: 'white', height: canvasHeight / 3, delay: 500 },
+             ],
+             // 骨の壁ウェーブ (ランダムな位置に空き)
+             (() => {
+                 const pattern = [];
+                 const gapSize = player.height * 3; // プレイヤーの高さの3倍の隙間
+                 // 空き位置がキャンバスの上下端に寄りすぎないように調整
+                 const minGapY = 20; // 上端からの最小距離
+                 const maxGapY = canvasHeight - gapSize - 20; // 下端からの最小距離
+                 const gapPosition = minGapY + Math.random() * (maxGapY - minGapY); // 空き位置をランダムに決定
+                 const boneDensity = 20; // 骨を生成するY座標の間隔 (大きすぎると隙間が潰れる可能性)
+
+                 for (let y = 0; y < canvasHeight; y += boneDensity) {
+                     // 空き位置の範囲外であれば骨を追加
+                     if (y < gapPosition || y > gapPosition + gapSize) {
+                         pattern.push({
+                             y: y,
+                             type: 'white', // 壁は白い骨で構成
+                             height: boneDensity + 2, // 骨を少し重ねて隙間をなくす
+                             delay: 0 // 全て同時に出現
+                         });
+                     }
+                 }
+                 return pattern;
+             })()
+        ];
+        let currentWaveSequence = []; // 現在進行中のウェーブの骨シーケンス
+        let timeIntoWave = 0; // ウェーブ開始からの経過時間
+        const timeBetweenWaves = 2000; // ウェーブ間の最小間隔 (ミリ秒)
+        let timeSinceLastWave = 0; // 最後のウェーブ終了からの経過時間
+        const waveStartChance = 0.01; // ウェーブ開始の確率 (フレームごと)
+
+        // --- 描画関数 ---
+        // プレイヤー（ハート）を描画
+        function drawPlayer() {
+            ctx.fillStyle = player.color;
+            // ハートの形状を描画
+            ctx.beginPath();
+            ctx.moveTo(player.x, player.y + player.height / 4);
+            ctx.quadraticCurveTo(player.x, player.y, player.x + player.width / 2, player.y);
+            ctx.quadraticCurveTo(player.x + player.width, player.y, player.x + player.width, player.y + player.height / 4);
+            ctx.quadraticCurveTo(player.x + player.width, player.y + player.height / 2, player.x + player.width / 2, player.y + player.height * 3/4);
+            ctx.quadraticCurveTo(player.x, player.y + player.height / 2, player.x, player.y + player.height / 4);
+            ctx.closePath();
+            ctx.fill();
+
+            // 無敵時間中は点滅させる (簡易的な表現)
+            if (player.isInvincible && Math.floor(Date.now() / 50) % 2 === 0) {
+                 ctx.strokeStyle = 'yellow';
+                 ctx.lineWidth = 3;
+                 ctx.stroke();
+            }
+        }
+
+        // 骨を描画
+        function drawBone(bone) {
+            // 骨の種類によって色を変更
+            if (bone.type === 'orange') {
+                ctx.fillStyle = 'orange';
+            } else if (bone.type === 'blue') {
+                ctx.fillStyle = 'blue';
+            } else {
+                ctx.fillStyle = boneProps.color; // white
+            }
+            // 骨の高さはパターンで指定されていればそれを使用、なければデフォルトを使用
+            const boneHeight = bone.height || boneProps.height;
+            ctx.fillRect(bone.x, bone.y, bone.width, boneHeight);
+        }
+
+        // ガスターブラスターを描画
+        function drawGasterBlaster(blaster) {
+            // ガスターブラスター本体 (シンプルな四角形で表現)
+            ctx.fillStyle = blaster.color;
+            ctx.fillRect(blaster.x, blaster.y, blaster.size, blaster.size);
+
+            // チャージ中のエフェクト (点滅など追加しても良い)
+            if (Date.now() - blaster.spawnTime < gasterBlasterProps.chargeTime) {
+                 ctx.strokeStyle = 'yellow';
+                 ctx.lineWidth = 2;
+                 ctx.strokeRect(blaster.x, blaster.y, blaster.size, blaster.size);
+            }
+
+            // レーザーを描画 (向きを逆にする)
+            if (blaster.laserActive) {
+                ctx.fillStyle = blaster.color;
+                // レーザーはガスターブラスターの左側から水平に発射される
+                ctx.fillRect(blaster.x - gasterBlasterProps.laserLength, blaster.y + blaster.size / 2 - gasterBlasterProps.laserWidth / 2, gasterBlasterProps.laserLength, gasterBlasterProps.laserWidth);
+            }
+        }
+
+
+        // --- 更新関数 ---
+        // プレイヤーの位置を更新
+        function updatePlayer() {
+            player.x += player.dx;
+            player.y += player.dy;
+
+            // 壁との衝突判定 (画面外に出ないようにする)
+            if (player.x < 0) player.x = 0;
+            if (player.x + player.width > canvasWidth) player.x = canvasWidth - player.width;
+            if (player.y < 0) player.y = 0;
+            if (player.y + player.height > canvasHeight) player.y = canvasHeight - player.height;
+
+            // 無敵時間の更新
+            if (player.isInvincible && Date.now() - player.lastDamageTime > player.invincibilityDuration) {
+                player.isInvincible = false;
+            }
+        }
+
+        // 骨の位置を更新
+        function updateBones() {
+            for (let i = bones.length - 1; i >= 0; i--) {
+                const bone = bones[i];
+                bone.x -= boneProps.speed; // 左に移動
+
+                // 画面外に出た骨を削除
+                if (bone.x + bone.width < 0) {
+                    bones.splice(i, 1);
+                }
+            }
+        }
+
+        // 新しいガスターブラスターを生成
+        function spawnGasterBlaster() {
+             const currentTime = Date.now();
+             if (currentTime - lastGasterBlasterSpawnTime > gasterBlasterProps.spawnInterval) {
+                 lastGasterBlasterSpawnTime = currentTime;
+                 // ガスターブラスターはプレイヤーのY座標付近に出現させると難易度が上がる
+                 const blasterY = player.y + player.height / 2 - gasterBlasterProps.size / 2;
+                 // キャンバスの上下端からは少し離す
+                 const safeBlasterY = Math.max(0, Math.min(canvasHeight - gasterBlasterProps.size, blasterY));
+
+                 gasterBlasters.push({
+                     x: canvasWidth - gasterBlasterProps.size - 20, // 右端から少し内側に出現
+                     y: safeBlasterY,
+                     size: gasterBlasterProps.size,
+                     spawnTime: currentTime, // 出現時刻を記録
+                     laserActive: false // 最初はレーザー非アクティブ
+                 });
+
+                 // ガスターブラスターの出現間隔を少しずつ短くする (最小値を設定)
+                 if (gasterBlasterProps.spawnInterval > gasterBlasterProps.minSpawnInterval) {
+                     gasterBlasterProps.spawnInterval -= 20;
+                 }
+             }
+        }
+
+        // ガスターブラスターの状態を更新
+        function updateGasterBlasters() {
+            const currentTime = Date.now();
+            for (let i = gasterBlasters.length - 1; i >= 0; i--) {
+                const blaster = gasterBlasters[i];
+
+                // チャージ時間を超えたらレーザー発射
+                if (!blaster.laserActive && currentTime - blaster.spawnTime > gasterBlasterProps.chargeTime) {
+                    blaster.laserActive = true;
+                    blaster.laserStartTime = currentTime; // レーザー発射時刻を記録
+                }
+
+                // レーザー持続時間を超えたらレーザー非アクティブ化
+                if (blaster.laserActive && currentTime - blaster.laserStartTime > gasterBlasterProps.laserDuration) {
+                    blaster.laserActive = false;
+                }
+
+                // 一定時間経過したらガスターブラスター自体を削除 (今回はレーザーが消えたら削除)
+                 if (!blaster.laserActive && currentTime - blaster.spawnTime > gasterBlasterProps.chargeTime + gasterBlasterProps.laserDuration + 500) { // レーザー終了から少し遅れて削除
+                     gasterBlasters.splice(i, 1);
+                 }
+            }
+        }
+
+        // ダメージを与える関数
+        function takeDamage(amount) {
+            const currentTime = Date.now();
+            // 無敵時間中でない場合のみダメージを受ける
+            if (!player.isInvincible) {
+                player.hp -= amount;
+                player.isInvincible = true; // 無敵状態にする
+                player.lastDamageTime = currentTime; // ダメージを受けた時刻を記録
+                updateHpDisplay(); // HP表示を更新
+
+                if (player.hp <= 0) {
+                    gameOver();
+                }
+            }
+        }
+
+
+        // --- 衝突判定 ---
+        function checkCollisions() {
+            // 骨との衝突判定
+            for (const bone of bones) {
+                // プレイヤーと骨の矩形が重なっているか判定
+                 const boneHeight = bone.height || boneProps.height; // 骨の高さを使用
+                const isColliding = (
+                    player.x < bone.x + bone.width &&
+                    player.x + player.width > bone.x &&
+                    player.y < bone.y + boneHeight &&
+                    player.y + player.height > bone.y
+                );
+
+                if (isColliding) {
+                    // 骨の種類によるダメージ判定
+                    if (bone.type === 'orange') {
+                        // オレンジの骨は止まっているとダメージ
+                        if (player.dx === 0 && player.dy === 0) {
+                            takeDamage(2); // 2ダメージ
+                        }
+                    } else if (bone.type === 'blue') {
+                        // 青い骨は動いているとダメージ
+                        if (player.dx !== 0 || player.dy !== 0) {
+                            takeDamage(2); // 2ダメージ
+                        }
+                    } else {
+                        // 白い骨は常にダメージ
+                        takeDamage(2); // 2ダメージ
+                    }
+                }
+            }
+
+            // ガスターブラスターのレーザーとの衝突判定 (向きを考慮)
+            for (const blaster of gasterBlasters) {
+                if (blaster.laserActive) {
+                    // レーザーの当たり判定領域 (左向き)
+                    const laserHitbox = {
+                        x: blaster.x - gasterBlasterProps.laserLength, // 左端のX座標
+                        y: blaster.y + blaster.size / 2 - gasterBlasterProps.laserWidth / 2,
+                        width: gasterBlasterProps.laserLength,
+                        height: gasterBlasterProps.laserWidth
+                    };
+
+                    // プレイヤーとレーザーの矩形が重なっているか判定
+                    if (
+                        player.x < laserHitbox.x + laserHitbox.width &&
+                        player.x + player.width > laserHitbox.x &&
+                        player.y < laserHitbox.y + laserHitbox.height &&
+                        player.y + player.height > laserHitbox.y
+                    ) {
+                        takeDamage(2); // 2ダメージ
+                    }
+                }
+            }
+        }
+
+        // HP表示を更新する関数
+        function updateHpDisplay() {
+            hpBoard.textContent = `HP: ${Math.max(0, player.hp)}`; // HPが0未満にならないように表示
+        }
+
+        // --- スコア更新 ---
+        function updateScore() {
+            if (gameRunning) {
+                const elapsedTime = Math.floor((Date.now() - startTime) / 1000); // 秒単位
+                score = elapsedTime;
+                scoreBoard.textContent = `スコア: ${score}`;
+            }
+        }
+
+        // --- ゲーム制御 ---
+        function gameLoop() {
+            if (!gameRunning) return;
+
+            const currentTime = Date.now();
+            const deltaTime = currentTime - (gameLoop.lastTime || currentTime); // デルタ時間を計算
+            gameLoop.lastTime = currentTime; // 次のフレームのために現在時刻を保存
+
+            // 画面をクリア
+            ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+
+            // 更新処理
+            updatePlayer();
+            updateBones(); // 骨の移動と削除
+            updateGasterBlasters(); // ガスターブラスターの状態更新
+            checkCollisions(); // 衝突判定とダメージ処理
+            updateScore();
+
+            // --- ウェーブ管理ロジック ---
+            if (currentWaveSequence.length === 0) { // 現在進行中のウェーブがない場合
+                timeSinceLastWave += deltaTime;
+                // 最小間隔が経過し、かつ一定確率で新しいウェーブを開始
+                if (timeSinceLastWave > timeBetweenWaves && Math.random() < waveStartChance) {
+                    const randomPattern = wavePatterns[Math.floor(Math.random() * wavePatterns.length)];
+                    // パターンのディープコピーを作成して、元の配列を破壊しないようにする
+                    currentWaveSequence = JSON.parse(JSON.stringify(randomPattern));
+                    timeSinceLastWave = 0; // タイマーをリセット
+                    timeIntoWave = 0; // ウェーブ内タイマーをリセット
+                } else {
+                    // ウェーブが開始しない場合、時々ランダムな骨を単体で生成
+                     if (currentTime - lastBoneSpawnTime > boneProps.spawnInterval) {
+                         lastBoneSpawnTime = currentTime;
+                         const boneY = Math.random() * (canvasHeight - boneProps.height);
+                          // 単体骨の種類もランダムに
+                         const randomBoneType = boneProps.types[Math.floor(Math.random() * boneProps.types.length)];
+                         bones.push({
+                             x: canvasWidth, // 右端から出現
+                             y: boneY,
+                             width: boneProps.width,
+                             height: boneProps.height,
+                             type: randomBoneType
+                         });
+                         // ランダム骨の出現間隔を少しずつ短くする (最小値を設定)
+                         if (boneProps.spawnInterval > boneProps.minSpawnInterval) {
+                            boneProps.spawnInterval -= 5;
+                         }
+                     }
+                }
+            } else { // ウェーブが進行中の場合
+                timeIntoWave += deltaTime;
+                // シーケンス内の骨をチェックし、遅延時間が経過していればメインの骨リストに追加
+                for (let i = currentWaveSequence.length - 1; i >= 0; i--) {
+                    const bone = currentWaveSequence[i];
+                    if (timeIntoWave >= bone.delay) {
+                        // メインの骨配列に骨を追加
+                        bones.push({
+                            x: canvasWidth, // 右端から出現
+                            y: bone.y,
+                            width: boneProps.width, // デフォルトの幅を使用
+                            height: bone.height || boneProps.height, // パターンで高さが指定されていればそれを使用、なければデフォルト
+                            type: bone.type // パターンの種類を使用
+                        });
+                        // ウェーブシーケンスから骨を削除
+                        currentWaveSequence.splice(i, 1);
+                    }
+                }
+                // ウェーブ中でもガスターブラスターは出現可能
+                 spawnGasterBlaster();
+            }
+
+
+            // 描画処理
+            drawPlayer();
+            bones.forEach(drawBone); // 骨を描画
+            gasterBlasters.forEach(drawGasterBlaster); // ガスターブラスターを描画
+
+            // 次のフレームを要求
+            animationId = requestAnimationFrame(gameLoop);
+        }
+
+        function startGame() {
+            if (gameRunning) return;
+            gameRunning = true;
+            // プレイヤーの初期化
+            player.x = 50;
+            player.y = canvasHeight / 2 - player.height / 2;
+            player.dx = 0;
+            player.dy = 0;
+            player.currentSpeed = player.normalSpeed;
+            player.hp = player.maxHp;
+            player.isInvincible = false;
+            player.lastDamageTime = 0;
+
+            // 障害物の初期化
+            bones.length = 0;
+            gasterBlasters.length = 0;
+
+            // スコアの初期化
+            score = 0;
+            startTime = Date.now();
+
+            // ウェーブ関連の初期化
+            currentWaveSequence = [];
+            timeIntoWave = 0;
+            timeSinceLastWave = 0;
+            boneProps.spawnInterval = 500; // 骨の初期出現間隔に戻す
+            lastBoneSpawnTime = Date.now(); // 単体骨生成用タイマー
+            gasterBlasterProps.spawnInterval = 3000; // ガスターブラスターの初期出現間隔に戻す
+            lastGasterBlasterSpawnTime = Date.now(); // ガスターブラスター生成用タイマー
+            gameLoop.lastTime = Date.now(); // デルタ時間計算のための初期化
+
+
+            // UIの更新
+            updateHpDisplay();
+            scoreBoard.textContent = `スコア: ${score}`;
+            gameOverMessage.style.display = 'none';
+            startButton.style.display = 'none';
+            restartButton.style.display = 'inline-block';
+            restartButton.textContent = 'リスタート';
+
+            // ゲームループを開始
+            gameLoop();
+        }
+
+        function gameOver() {
+            gameRunning = false;
+            cancelAnimationFrame(animationId);
+            gameOverMessage.style.display = 'block';
+            restartButton.textContent = 'もう一度挑戦';
+            // キーの状態とプレイヤーの移動をリセット
+            pressedKeys.clear();
+            player.dx = 0;
+            player.dy = 0;
+            player.currentSpeed = player.normalSpeed;
+
+            // ゲームオーバー時にウェーブ関連の変数をリセット
+            currentWaveSequence = [];
+            timeIntoWave = 0;
+            timeSinceLastWave = 0;
+            lastBoneSpawnTime = 0; // スポーンタイマーもリセット
+            lastGasterBlasterSpawnTime = 0;
+            gameLoop.lastTime = undefined; // デルタ時間計算をリセット
+        }
+
+        // 移動方向を更新するヘルパー関数
+        function updateMovement() {
+            player.currentSpeed = pressedKeys.has('Shift') ? player.slowSpeed : player.normalSpeed;
+
+            player.dx = 0;
+            player.dy = 0;
+
+            if (pressedKeys.has('ArrowRight') || pressedKeys.has('Right')) {
+                player.dx = player.currentSpeed;
+            } else if (pressedKeys.has('ArrowLeft') || pressedKeys.has('Left')) {
+                player.dx = -player.currentSpeed;
+            }
+
+            if (pressedKeys.has('ArrowDown') || pressedKeys.has('Down')) {
+                player.dy = player.currentSpeed;
+            } else if (pressedKeys.has('ArrowUp') || pressedKeys.has('Up')) {
+                player.dy = -player.currentSpeed;
+            }
+        }
+
+
+        // --- イベントリスナー ---
+        // キーボード操作
+        function handleKeyDown(e) {
+            if (!gameRunning && e.key !== 'Enter') {
+                 // ゲーム中でなければEnter以外は無視
+                 // ただし、スタート画面でEnterを押した場合はゲームを開始
+                 if (e.key === 'Enter' && startButton.style.display !== 'none') {
+                     startGame();
+                 }
+                 return;
+            }
+
+            // ゲームオーバー時にEnterでリスタート
+            if (e.key === 'Enter' && !gameRunning && gameOverMessage.style.display === 'block') {
+                startGame();
+                return; // リスタートしたら以降の処理は不要
+            }
+
+
+            // 押されたキーをセットに追加
+            if (['ArrowRight', 'Right', 'ArrowLeft', 'Left', 'ArrowUp', 'Up', 'ArrowDown', 'Down', 'Shift'].includes(e.key)) {
+                 pressedKeys.add(e.key);
+                 updateMovement(); // 移動方向と速度を更新
+            }
+        }
+
+        function handleKeyUp(e) {
+            // 離されたキーをセットから削除
+            if (['ArrowRight', 'Right', 'ArrowLeft', 'Left', 'ArrowUp', 'Up', 'ArrowDown', 'Down', 'Shift'].includes(e.key)) {
+                 pressedKeys.delete(e.key);
+                 updateMovement(); // 移動方向と速度を更新
+            }
+        }
+
+        document.addEventListener('keydown', handleKeyDown);
+        document.addEventListener('keyup', handleKeyUp);
+
+        startButton.addEventListener('click', startGame);
+        restartButton.addEventListener('click', startGame);
+
+        // 初期表示
+        function initializeScreen() {
+            ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+            ctx.fillStyle = 'white';
+            ctx.font = "20px 'Press Start 2P'";
+            ctx.textAlign = 'center';
+            // スタート画面でプレイヤーを初期位置に描画
+            player.x = 50;
+            player.y = canvasHeight / 2 - player.height / 2;
+            drawPlayer();
+            updateHpDisplay(); // 初期HPを表示
+        }
+
+        window.onload = () => {
+            initializeScreen(); // 初期画面を描画
+        };
+
+    </script>
+</body>
+</html>
